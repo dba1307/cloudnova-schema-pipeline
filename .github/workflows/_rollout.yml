@@ -30,6 +30,7 @@ jobs:
         env:
           TARGET_MODE: ${{ vars.TARGET_MODE || 'demo' }}
           DB_HOST: ${{ vars.DB_HOST }}
+          DB_CLUSTER_ID: ${{ vars.DB_CLUSTER_ID }}
           AWS_REGION: ${{ vars.AWS_REGION }}
           RDS_CA_BUNDLE: ${{ vars.RDS_CA_BUNDLE }}
           ALARM_PREFIX: ${{ vars.ALARM_PREFIX }}
