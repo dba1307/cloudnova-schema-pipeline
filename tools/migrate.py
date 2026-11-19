@@ -86,14 +86,27 @@ def cmd_status(a):
     done = applied(); print(f"applied={sorted(done)} local={[m['version'] for m in local(a.dir)]}")
 
 def with_advisory_lock(fn, a):
+    import subprocess
     LOCK_KEY = 84729103412
-    got = rows(f"SELECT pg_try_advisory_lock({LOCK_KEY})")[0][0]
+    proc = subprocess.Popen(
+        ["psql", "-X", "-At", "-v", "ON_ERROR_STOP=1"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    proc.stdin.write(f"SELECT pg_try_advisory_lock({LOCK_KEY});\n")
+    proc.stdin.flush()
+    got = proc.stdout.readline().strip()
     if got != "t":
+        proc.terminate()
         sys.exit("ANOTHER MIGRATION RUN IS IN PROGRESS (could not acquire pg_try_advisory_lock)")
     try:
         fn(a)
     finally:
-        psql(["-c", f"SELECT pg_advisory_unlock({LOCK_KEY})"])
+        try:
+            proc.stdin.write(f"SELECT pg_advisory_unlock({LOCK_KEY});\n\\q\n")
+            proc.stdin.flush()
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["up", "down", "status"])
