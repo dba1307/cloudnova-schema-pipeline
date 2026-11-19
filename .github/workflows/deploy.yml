@@ -20,12 +20,16 @@ jobs:
     env: { PGHOST: localhost, PGPORT: 5432, PGDATABASE: cloudnova, PGUSER: postgres, PGPASSWORD: postgres }
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 2 }
+        with: { fetch-depth: 0 }
       - name: Re-lint (defence in depth; PR checks could have been bypassed) and detect NEW waivers only
         id: lint
         run: |
           python3 tools/lint_migration.py migrations
-          CHANGED=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" -- 'migrations/*.sql' 2>/dev/null || true)
+          if [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            CHANGED=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" -- 'migrations/*.sql')
+          else
+            CHANGED=""
+          fi
           if [ -n "$CHANGED" ]; then
             python3 tools/lint_migration.py $CHANGED
           else

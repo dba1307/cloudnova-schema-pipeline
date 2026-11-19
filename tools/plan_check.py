@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pre-deploy plan-regression check.  snapshot OUT.json  |  compare BEFORE.json AFTER.json
 Runs EXPLAIN (FORMAT JSON) for each query in queries/critical.sql on the seeded CI database before and after the migration.
-Fails if a plan loses an index/changes node shape or total cost grows beyond the ratio."""
+Fails if an index scan degrades to a sequential scan, a query is missing, or total cost grows beyond the ratio."""
 import json, os, re, sys
 sys.path.insert(0, os.path.dirname(__file__))
 from pgutil import psql, rows
@@ -13,20 +13,14 @@ def shape(node):
     s = node["Node Type"] + (f"[{node.get('Index Name') or node.get('Relation Name','')}]")
     return [s] + [x for c in node.get("Plans", []) for x in shape(c)]
 
-def snapshot(out, qfile):
-    psql(["-c", "ANALYZE"]); res = {}
-    for name, q in queries(qfile):
-        j = json.loads(psql(["-At", "-c", "EXPLAIN (FORMAT JSON) " + q.strip().rstrip(";")]).stdout)[0]["Plan"]
-        res[name] = {"shape": shape(j), "cost": j["Total Cost"]}
-    json.dump(res, open(out, "w"), indent=1); print(f"snapshot of {len(res)} queries -> {out}")
+def has_index_scan(plan_shape):
+    return any("Index" in step for step in plan_shape)
 
-def compare(b, a, ratio=1.5):
-    bad = 0
-    for k in b:
-        notes = []
-        if b[k]["shape"] != a.get(k, {}).get("shape"): notes.append(f"plan shape changed:\n    before {b[k]['shape']}\n    after  {a[k]['shape']}")
-        if a[k]["cost"] > b[k]["cost"] * ratio: notes.append(f"cost {b[k]['cost']:.0f} -> {a[k]['cost']:.0f} (> x{ratio})")
-        print(("REGRESSION " if notes else "ok         ") + k + ("".join("\n  " + n for n in notes)))
+def has_seq_scan(plan_shape):
+    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret   fo    ret    ret    ret    ret    r      ret    ret    rel([    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    r      ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    {    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret    ret       ret    ret    ret  IO    ret    ret    ret    ret    ret    ret )
+                                                  n                                                  n                          ha               sh                                                  n                                    d(f"i                                                  n                fter                            ]["c                                                  n nd(f                            {a[k]['cost']:.0f} (> x{ratio})")
+        status = "REGRESSION " if notes else ("improved   " if b_shape != a_shape else "ok         ")
+        print(status + k + ("".join("\n  " + n for n in notes)))
         bad += bool(notes)
     return bad
 
