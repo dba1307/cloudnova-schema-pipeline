@@ -19,10 +19,37 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-                                                  su                               C, no l                               s.                                                  su                               C, no l                               s.                                  region: "${{ vars.AWS_REGION }}"
-      - name: Roll back (refuses migrations t      - name: Roll back (refuses migrations t      - name: Roll back (refusMO      - name: Roll back (refuses migrations t  HO      - name: Roll back (refuses migrations t      - name: Roll back (refuses migrations t   UNDLE }}      - na R      - name: Roll back (refuses migrations t      - name: Roll back (refuses mi}}      - name: Roll back (refuses migrations t           - name"$      - name:S"       - name: Roll back (
-                                                                   $RO                            e                  
-                                                                                                                      B_HOST:?}" "${AWS_REGION:?}"
+      - uses: actions/checkout@v4
+      - name: Assume this environment role (OIDC, no long-lived keys)
+        if: vars.TARGET_MODE == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: "${{ vars.AWS_ROLE_ARN }}"
+          aws-region: "${{ vars.AWS_REGION }}"
+      - name: Roll back (refuses migrations that have no .down.sql)
+        env:
+          TARGET_MODE: ${{ vars.TARGET_MODE || 'demo' }}
+          DB_HOST: ${{ vars.DB_HOST }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          RDS_CA_BUNDLE: ${{ vars.RDS_CA_BUNDLE }}
+          ROLLBACK_STEPS: ${{ inputs.steps }}
+          ROLLBACK_REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$ROLLBACK_STEPS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::steps must be a positive integer (got: '$ROLLBACK_STEPS')"
+            exit 1
+          fi
+          printf 'reason: %s\n' "$ROLLBACK_REASON"
+          if [[ "$TARGET_MODE" == "aws" ]]; then
+            : "${DB_HOST:?}" "${AWS_REGION:?}"
             export PGHOST="$DB_HOST" PGPORT=5432 PGUSER=migrator PGDATABASE=cloudnova PGSSLMODE=verify-full PGSSLROOTCERT="${RDS_CA_BUNDLE:?}"
-            PGPASSWORD="$(aws rds generate-db-auth-token --hostname "$DB_HOST" --port 5432 --region "$AWS_REGION" --username migrator)"; export             PGPASSWORD="$(aws rds generate-db-auth-token --hostname "$DB_HOST" --port 5432 --region "$AWS_REGION" --username migrator)"; export             PGPASSWORD="$(aws rds generate-db-auth-token --hostname "$DB_HOST" --port 5432 --region "$AWS_REGION" --username migrator)"; export             PGPASSWORD="$(aws rds generate-db-auth-token --hostname "$DB_HOST" --port 5432 --region "$AWS_REGION" --username migrator)"; export             PGPASSWORD="$(aws rds genee.py down --steps "$ROLLBACK_STEPS"
+            PGPASSWORD="$(aws rds generate-db-auth-token --hostname "$DB_HOST" --port 5432 --region "$AWS_REGION" --username migrator)"; export PGPASSWORD
+          else
+            export PGHOST=localhost PGPORT=5432 PGDATABASE=cloudnova
+            PGUSER=postgres PGPASSWORD=postgres psql -X -q -v ON_ERROR_STOP=1 -f db/bootstrap/roles.sql -c "ALTER ROLE migrator PASSWORD 'ci-only'"
+            export PGUSER=migrator PGPASSWORD=ci-only
+            python3 tools/migrate.py up          # demo only: put the ephemeral container at head so there is something to revert
+          fi
+          python3 tools/migrate.py down --steps "$ROLLBACK_STEPS"
           python3 tools/verify.py
