@@ -17,8 +17,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - name: Gate self-test (good migrations pass, every bad fixture is blocked)
-        run: python3 tests/test_lint.py
+      - name: Gate & plan-check unit tests
+        run: |
+          python3 tests/test_lint.py
+          python3 tests/test_plan_check.py
+      - name: Third-party SQL linter (Squawk) on new migrations
+        continue-on-error: true
+        run: |
+          files=$(git diff --name-only --diff-filter=A origin/${{ github.base_ref }}...HEAD -- 'migrations/*.sql' | grep -v '\.down\.sql$' || true)
+          [ -z "$files" ] && { echo "no new migrations for squawk"; exit 0; }
+          npx --yes squawk-cli@1.5.0 $files
       - name: Merged migrations are immutable
         run: |
           changed=$(git diff --name-status --diff-filter=MDR origin/${{ github.base_ref }}...HEAD -- migrations/ | tee /dev/stderr)
@@ -62,6 +70,18 @@ jobs:
           psql -X -d postgres -c "CREATE DATABASE rehearsal TEMPLATE cloudnova"
           PGDATABASE=rehearsal python3 tools/dynamic_check.py --apply $(cat new_files.txt)
           psql -X -d postgres -c "DROP DATABASE rehearsal"
+      - name: Verify DB advisory lock prevents concurrent migrate.py runs
+        run: |
+          python3 - << 'EOF'
+          import subprocess, time
+          p1 = subprocess.Popen(["psql", "-X", "-At", "-c", "SELECT pg_advisory_lock(84729103412); SELECT pg_sleep(2);"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+          time.sleep(0.5)
+          p2 = subprocess.run(["python3", "tools/migrate.py", "up"], capture_output=True, text=True)
+          p1.wait(timeout=10)
+          assert p2.returncode != 0, "Expected second migrate.py run to fail on advisory lock"
+          assert "ANOTHER MIGRATION RUN IS IN PROGRESS" in (p2.stderr + p2.stdout), f"Unexpected error: {p2.stderr} {p2.stdout}"
+          print("PASS concurrent migrate.py blocked cleanly by advisory lock")
+          EOF
       - name: Apply all migrations for real, then verify
         run: python3 tools/migrate.py up && python3 tools/verify.py
       - name: Plan snapshot AFTER, fail on regression

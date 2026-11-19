@@ -86,25 +86,38 @@ def cmd_status(a):
     done = applied(); print(f"applied={sorted(done)} local={[m['version'] for m in local(a.dir)]}")
 
 def with_advisory_lock(fn, a):
-    import subprocess
+    import select, subprocess
     LOCK_KEY = 84729103412
+    # Surface real DB connection/auth errors immediately before checking the lock
+    psql(["-c", "SELECT 1"])
     proc = subprocess.Popen(
-        ["psql", "-X", "-At", "-v", "ON_ERROR_STOP=1"],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        ["psql", "-X", "-At", "-q", "-v", "ON_ERROR_STOP=1", "--csv"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1
     )
-    proc.stdin.write(f"SELECT pg_try_advisory_lock({LOCK_KEY});\n")
-    proc.stdin.flush()
-    got = proc.stdout.readline().strip()
-    if got != "t":
-        proc.terminate()
-        sys.exit("ANOTHER MIGRATION RUN IS IN PROGRESS (could not acquire pg_try_advisory_lock)")
     try:
+        proc.stdin.write(f"SELECT pg_try_advisory_lock({LOCK_KEY});\n")
+        proc.stdin.flush()
+        rlist, _, _ = select.select([proc.stdout, proc.stderr], [], [], 10.0)
+        if not rlist:
+            proc.kill()
+            sys.exit("Timed out waiting for advisory lock check from Postgres")
+        if proc.poll() is not None and proc.returncode != 0:
+            err = proc.stderr.read().strip()
+            sys.exit(f"Database connection error acquiring advisory lock: {err}")
+        got = proc.stdout.readline().strip()
+        if got != "t":
+            err = proc.stderr.read().strip() if proc.poll() is not None else ""
+            proc.terminate()
+            if err:
+                sys.exit(f"Database error acquiring advisory lock: {err}")
+            sys.exit("ANOTHER MIGRATION RUN IS IN PROGRESS (could not acquire pg_try_advisory_lock)")
         fn(a)
     finally:
         try:
-            proc.stdin.write(f"SELECT pg_advisory_unlock({LOCK_KEY});\n\\q\n")
-            proc.stdin.flush()
-            proc.wait(timeout=5)
+            if proc.poll() is None:
+                proc.stdin.write(f"SELECT pg_advisory_unlock({LOCK_KEY});\n\\q\n")
+                proc.stdin.flush()
+                proc.wait(timeout=5)
         except Exception:
             proc.kill()
 

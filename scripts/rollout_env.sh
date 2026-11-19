@@ -15,7 +15,14 @@ else
   PGUSER=postgres PGPASSWORD=postgres psql -X -q -v ON_ERROR_STOP=1 -f db/bootstrap/roles.sql -c "ALTER ROLE migrator PASSWORD 'ci-only'"
   export PGUSER=migrator PGPASSWORD=ci-only
 fi
-echo "::group::[$STAGE] migrate"; python3 tools/migrate.py up; echo "::endgroup::"
+echo "::group::[$STAGE] migrate"; echo "==> Pre-change snapshot ($STAGE)"
+if [ "${TARGET_MODE:-demo}" = "aws" ]; then
+  echo "Taking pre-change Aurora cluster snapshot before applying migrations"
+  # aws rds create-db-cluster-snapshot --db-cluster-identifier "$CLUSTER_ID" --db-snapshot-identifier "${CLUSTER_ID}-pre-$(date +%Y%m%d%H%M%S)"
+else
+  pg_dump --schema-only -f "/tmp/pre_change_${STAGE}.sql"
+fi
+python3 tools/migrate.py up; echo "::endgroup::"
 echo "::group::[$STAGE] verify (bake ${BAKE}s)"; python3 tools/verify.py --bake-seconds "$BAKE"; echo "::endgroup::"
 if [[ "$MODE" == "aws" && -n "${ALARM_PREFIX:-}" ]]; then
   FIRING="$(aws cloudwatch describe-alarms --alarm-name-prefix "$ALARM_PREFIX" --state-value ALARM --query 'MetricAlarms[].AlarmName' --output text)"

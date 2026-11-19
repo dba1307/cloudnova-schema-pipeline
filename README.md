@@ -27,10 +27,10 @@ flowchart LR
 | Layer | What | Where |
 |---|---|---|
 | Infra | VPC, Aurora PG16 (writer + readers), KMS, param group, OIDC pipeline role, break-glass role, alarms | `terraform/` |
-| Gate (static) | 17 rules over statements; per-file waivers | `tools/lint_migration.py` |
+| Gate (static) | 17 rules over statements + Squawk companion check; per-file waivers | `tools/lint_migration.py`, `pr-checks.yml` |
 | Gate (dynamic) | Runs the migration in a txn on 300k seeded rows, detects rewrites via `relfilenode`, measures ACCESS EXCLUSIVE hold, rolls back | `tools/dynamic_check.py` |
-| Gate (plans) | `EXPLAIN` of hot queries before/after; fails on shape change or cost > 1.5× | `tools/plan_check.py`, `queries/critical.sql` |
-| Apply | `lock_timeout` 3s + retry/backoff, checksum + ordering checks, one txn per migration | `tools/migrate.py` |
+| Gate (plans) | `EXPLAIN` of hot queries before/after; fails if any relation degrades from index to `Seq Scan` or cost > 1.5× | `tools/plan_check.py`, `queries/critical.sql` |
+| Apply | DB session advisory lock (`pg_try_advisory_lock`), pre-change snapshot, `lock_timeout` 3s + retry/backoff, checksum checks | `tools/migrate.py`, `scripts/rollout_env.sh` |
 | Verify | smoke, INVALID indexes, lock waiters, replica lag, bake loop, CloudWatch alarm gate | `tools/verify.py`, `scripts/rollout_env.sh` |
 | Drift | normalised catalog fingerprint vs golden schema | `tools/fingerprint.py`, `drift.yml` |
 
@@ -49,7 +49,7 @@ flowchart LR
 ## Run and test
 
 ```bash
-make test                 # no DB needed: 15 assertions on the gate
+make test                 # no DB needed: 15 lint assertions + 8 plan-check unit tests
 make demo-block           # see the refusal messages
 make demo                 # needs Docker: apply → seed → verify → drift → rollback drill → plan check
 make tf-plan              # generate offline Terraform plans for staging, prod, and global

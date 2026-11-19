@@ -8,6 +8,7 @@ export PGPASSWORD ?= postgres
 
 test lint:   ## no database needed: gate self-test (good passes, 11 bad fixtures blocked, waiver, parser edge cases)
 	python3 tests/test_lint.py
+	python3 tests/test_plan_check.py
 
 db:          ## start Postgres 16
 	docker compose up -d --wait
