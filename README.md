@@ -49,7 +49,7 @@ flowchart LR
 ## Run and test
 
 ```bash
-make test                 # no DB needed: 15 lint assertions + 8 plan-check unit tests
+make test                 # no DB needed: 15 lint assertions + 9 plan-check unit tests
 make demo-block           # see the refusal messages
 make demo                 # needs Docker: apply → seed → verify → drift → rollback drill → plan check
 make tf-plan              # generate offline Terraform plans for staging, prod, and global
