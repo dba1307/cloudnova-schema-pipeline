@@ -24,7 +24,7 @@ jobs:
           python3 tests/test_tools.py
       - name: Third-party SQL linter (Squawk) on unwaived new migrations
         run: |
-          npx --yes squawk-cli@1.8.0 --version
+          npx --yes squawk-cli@2.72.0 --version
           files=$(git diff --name-only --diff-filter=A origin/${{ github.base_ref }}...HEAD -- 'migrations/*.sql' | grep -v '\.down\.sql$' || true)
           [ -z "$files" ] && { echo "no new migrations for squawk"; exit 0; }
           unwaived=""
@@ -36,7 +36,7 @@ jobs:
             fi
           done
           [ -z "$unwaived" ] && { echo "all new migrations have explicit waivers"; exit 0; }
-          npx --yes squawk-cli@1.8.0 $unwaived
+          npx --yes squawk-cli@2.72.0 $unwaived
       - name: Merged migrations are immutable
         run: |
           changed=$(git diff --name-status --diff-filter=MDR origin/${{ github.base_ref }}...HEAD -- migrations/ | tee /dev/stderr)
