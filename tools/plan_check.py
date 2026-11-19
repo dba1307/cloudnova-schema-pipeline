@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pre-deploy plan-regression check.  snapshot OUT.json  |  compare BEFORE.json AFTER.json
 Runs EXPLAIN (FORMAT JSON) for each query in queries/critical.sql on the seeded CI database before and after the migration.
-Fails if an index scan degrades to a sequential scan, a query is missing, or total cost grows beyond the ratio."""
+Fails if any relation degrades from an index scan to a sequential scan, a query is missing, or total cost grows beyond the ratio."""
 import json, os, re, sys
 sys.path.insert(0, os.path.dirname(__file__))
 from pgutil import psql
@@ -13,11 +13,18 @@ def shape(node):
     s = node["Node Type"] + (f"[{node.get('Index Name') or node.get('Relation Name','')}]")
     return [s] + [x for c in node.get("Plans", []) for x in shape(c)]
 
-def has_index_scan(plan_shape):
-    return any("Index" in step for step in plan_shape)
-
-def has_seq_scan(plan_shape):
-    return any(step.startswith("Seq Scan") for step in plan_shape)
+def scan_relations(plan_shape):
+    idx_rels, seq_rels = set(), set()
+    for step in plan_shape:
+        m = re.match(r"^([^\[]+)\[([^\]]*)\]$", step)
+        if not m:
+            continue
+        node_type, target = m.group(1), m.group(2)
+        if "Index" in node_type and target:
+            idx_rels.add(target)
+        elif node_type == "Seq Scan" and target:
+            seq_rels.add(target)
+    return idx_rels, seq_rels
 
 def snapshot(out, qfile):
     psql(["-c", "ANALYZE"])
@@ -38,8 +45,11 @@ def compare(b, a, ratio=1.5):
             continue
         notes = []
         b_shape, a_shape = b[k]["shape"], a[k]["shape"]
-        if has_index_scan(b_shape) and not has_index_scan(a_shape) and has_seq_scan(a_shape):
-            notes.append(f"index scan degraded to sequential scan:\n    before {b_shape}\n    after  {a_shape}")
+        b_idx, b_seq = scan_relations(b_shape)
+        a_idx, a_seq = scan_relations(a_shape)
+        new_seq = a_seq - b_seq
+        if b_idx and new_seq:
+            notes.append(f"relation(s) {sorted(new_seq)} newly using Seq Scan (had index usage {sorted(b_idx)}):\n    before {b_shape}\n    after  {a_shape}")
         if a[k]["cost"] > b[k]["cost"] * ratio:
             notes.append(f"cost {b[k]['cost']:.0f} -> {a[k]['cost']:.0f} (> x{ratio})")
         status = "REGRESSION " if notes else ("improved   " if b_shape != a_shape else "ok         ")

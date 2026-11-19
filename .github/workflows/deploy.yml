@@ -27,13 +27,13 @@ jobs:
           python3 tools/lint_migration.py migrations
           if [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
             CHANGED=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" -- 'migrations/*.sql')
+            if [ -n "$CHANGED" ]; then
+              python3 tools/lint_migration.py $CHANGED
+            else
+              echo "needs_approval=false" >> "$GITHUB_OUTPUT"
+            fi
           else
-            CHANGED=""
-          fi
-          if [ -n "$CHANGED" ]; then
-            python3 tools/lint_migration.py $CHANGED
-          else
-            echo "needs_approval=false" >> "$GITHUB_OUTPUT"
+            python3 tools/lint_migration.py migrations
           fi
       - run: python3 tools/migrate.py up && mkdir -p golden && python3 tools/fingerprint.py dump > golden/golden.json
       - uses: actions/upload-artifact@v4
