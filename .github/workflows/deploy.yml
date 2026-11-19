@@ -59,6 +59,7 @@ jobs:
   prod-rest:
     name: prod ${{ matrix.region }}
     needs: prod-canary
+    if: always() && needs.prod-canary.result == 'success'
     strategy:
       max-parallel: 1        # one region at a time
       fail-fast: true        # a failed region stops the remaining ones
