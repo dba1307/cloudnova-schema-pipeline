@@ -29,7 +29,7 @@ flowchart LR
 | Infra | VPC, Aurora PG16 (writer + readers), KMS, param group, OIDC pipeline role, break-glass role, alarms | `terraform/` |
 | Gate (static) | 17 rules over statements + Squawk companion check; per-file waivers | `tools/lint_migration.py`, `pr-checks.yml` |
 | Gate (dynamic) | Runs the migration in a txn on 300k seeded rows, detects rewrites via `relfilenode`, measures ACCESS EXCLUSIVE hold, rolls back | `tools/dynamic_check.py` |
-| Gate (plans) | `EXPLAIN` of hot queries before/after; fails if any relation degrades from index to `Seq Scan` or cost > 1.5× | `tools/plan_check.py`, `queries/critical.sql` |
+| Gate (plans) | `EXPLAIN` of hot queries before/after; fails if a relation that previously used an index degrades to `Seq Scan` or cost > 1.5× | `tools/plan_check.py`, `queries/critical.sql` |
 | Apply | DB session advisory lock (`pg_try_advisory_lock`), pre-change snapshot, `lock_timeout` 3s + retry/backoff, checksum checks | `tools/migrate.py`, `scripts/rollout_env.sh` |
 | Verify | smoke, INVALID indexes, lock waiters, replica lag, bake loop, CloudWatch alarm gate | `tools/verify.py`, `scripts/rollout_env.sh` |
 | Drift | normalised catalog fingerprint vs golden schema | `tools/fingerprint.py`, `drift.yml` |

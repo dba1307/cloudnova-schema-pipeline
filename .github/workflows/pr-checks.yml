@@ -21,12 +21,22 @@ jobs:
         run: |
           python3 tests/test_lint.py
           python3 tests/test_plan_check.py
-      - name: Third-party SQL linter (Squawk) on new migrations
-        continue-on-error: true
+          python3 tests/test_tools.py
+      - name: Third-party SQL linter (Squawk) on unwaived new migrations
         run: |
+          npx --yes squawk-cli@latest --version
           files=$(git diff --name-only --diff-filter=A origin/${{ github.base_ref }}...HEAD -- 'migrations/*.sql' | grep -v '\.down\.sql$' || true)
           [ -z "$files" ] && { echo "no new migrations for squawk"; exit 0; }
-          npx --yes squawk-cli@1.5.0 $files
+          unwaived=""
+          for f in $files; do
+            if grep -qE '^--[[:space:]]*lint:allow' "$f"; then
+              echo "Skipping blocking Squawk check on waived migration: $f"
+            else
+              unwaived="$unwaived $f"
+            fi
+          done
+          [ -z "$unwaived" ] && { echo "all new migrations have explicit waivers"; exit 0; }
+          npx --yes squawk-cli@latest $unwaived
       - name: Merged migrations are immutable
         run: |
           changed=$(git diff --name-status --diff-filter=MDR origin/${{ github.base_ref }}...HEAD -- migrations/ | tee /dev/stderr)
@@ -75,7 +85,15 @@ jobs:
           python3 - << 'EOF'
           import subprocess, time
           p1 = subprocess.Popen(["psql", "-X", "-At", "-c", "SELECT pg_advisory_lock(84729103412); SELECT pg_sleep(2);"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-          time.sleep(0.5)
+          deadline = time.time() + 10
+          while time.time() < deadline:
+              chk = subprocess.run(["psql", "-X", "-At", "-c", "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND granted AND ((classid::bigint << 32) | objid::bigint) = 84729103412"], capture_output=True, text=True)
+              if chk.stdout.strip() == "1":
+                  break
+              time.sleep(0.1)
+          else:
+              p1.kill()
+              raise AssertionError("Timed out waiting for p1 to acquire advisory lock")
           p2 = subprocess.run(["python3", "tools/migrate.py", "up"], capture_output=True, text=True)
           p1.wait(timeout=10)
           assert p2.returncode != 0, "Expected second migrate.py run to fail on advisory lock"
