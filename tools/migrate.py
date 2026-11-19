@@ -85,8 +85,34 @@ def cmd_down(a):
 def cmd_status(a):
     done = applied(); print(f"applied={sorted(done)} local={[m['version'] for m in local(a.dir)]}")
 
+def with_advisory_lock(fn, a):
+    import subprocess
+    LOCK_KEY = 84729103412
+    proc = subprocess.Popen(
+        ["psql", "-X", "-At", "-v", "ON_ERROR_STOP=1"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    proc.stdin.write(f"SELECT pg_try_advisory_lock({LOCK_KEY});\n")
+    proc.stdin.flush()
+    got = proc.stdout.readline().strip()
+    if got != "t":
+        proc.terminate()
+        sys.exit("ANOTHER MIGRATION RUN IS IN PROGRESS (could not acquire pg_try_advisory_lock)")
+    try:
+        fn(a)
+    finally:
+        try:
+            proc.stdin.write(f"SELECT pg_advisory_unlock({LOCK_KEY});\n\\q\n")
+            proc.stdin.flush()
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("cmd", choices=["up", "down", "status"])
     ap.add_argument("--dir", default="migrations"); ap.add_argument("--target", type=int); ap.add_argument("--steps", type=int, default=1)
     ap.add_argument("--dry-run", action="store_true"); a = ap.parse_args()
-    {"up": cmd_up, "down": cmd_down, "status": cmd_status}[a.cmd](a)
+    if a.cmd in ("up", "down") and not a.dry_run:
+        with_advisory_lock({"up": cmd_up, "down": cmd_down}[a.cmd], a)
+    else:
+        {"up": cmd_up, "down": cmd_down, "status": cmd_status}[a.cmd](a)
