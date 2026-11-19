@@ -15,12 +15,13 @@ else
   PGUSER=postgres PGPASSWORD=postgres psql -X -q -v ON_ERROR_STOP=1 -f db/bootstrap/roles.sql -c "ALTER ROLE migrator PASSWORD 'ci-only'"
   export PGUSER=migrator PGPASSWORD=ci-only
 fi
-echo "::group::[$STAGE] migrate"; echo "==> Pre-change snapshot ($STAGE)"
-if [ "${TARGET_MODE:-demo}" = "aws" ]; then
-  echo "Taking pre-change Aurora cluster snapshot before applying migrations"
-  # aws rds create-db-cluster-snapshot --db-cluster-identifier "$CLUSTER_ID" --db-snapshot-identifier "${CLUSTER_ID}-pre-$(date +%Y%m%d%H%M%S)"
-else
-  pg_dump --schema-only -f "/tmp/pre_change_${STAGE}.sql"
+echo "::group::[$STAGE] migrate"
+if [[ "$MODE" == "aws" ]]; then
+  : "${DB_CLUSTER_ID:?DB_CLUSTER_ID must be set in aws mode for pre-change cluster snapshots}"
+  SNAP_ID="${DB_CLUSTER_ID}-pre-$(date -u +%Y%m%d%H%M%S)"
+  echo "==> Creating pre-change Aurora cluster snapshot: $SNAP_ID"
+  aws rds create-db-cluster-snapshot --region "$AWS_REGION" --db-cluster-identifier "$DB_CLUSTER_ID" --db-cluster-snapshot-identifier "$SNAP_ID" >/dev/null
+  aws rds wait db-cluster-snapshot-available --region "$AWS_REGION" --db-cluster-snapshot-identifier "$SNAP_ID"
 fi
 python3 tools/migrate.py up; echo "::endgroup::"
 echo "::group::[$STAGE] verify (bake ${BAKE}s)"; python3 tools/verify.py --bake-seconds "$BAKE"; echo "::endgroup::"

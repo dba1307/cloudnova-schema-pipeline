@@ -1,5 +1,5 @@
-module.db_staging.data.aws_iam_policy_document.pipeline_trust: Reading...
 module.db_staging.data.aws_iam_policy_document.monitoring_trust: Reading...
+module.db_staging.data.aws_iam_policy_document.pipeline_trust: Reading...
 module.db_staging.data.aws_iam_policy_document.monitoring_trust: Read complete after 0s [id=76086537]
 module.db_staging.data.aws_iam_policy_document.pipeline_trust: Read complete after 0s [id=1990421608]
 
@@ -50,6 +50,17 @@ Terraform will perform the following actions:
               + (known after apply),
             ]
           + sid       = "ConnectAsMigratorOnly"
+        }
+      + statement {
+          + actions   = [
+              + "rds:CreateDBClusterSnapshot",
+              + "rds:DescribeDBClusterSnapshots",
+            ]
+          + resources = [
+              + "arn:aws:rds:eu-west-1:111111111111:cluster-snapshot:cloudnova-staging-pre-*",
+              + (known after apply),
+            ]
+          + sid       = "PreChangeClusterSnapshot"
         }
       + statement {
           + actions   = [

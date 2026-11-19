@@ -1,15 +1,15 @@
+module.db_use1.data.aws_iam_policy_document.monitoring_trust: Reading...
+module.db_use1.data.aws_iam_policy_document.pipeline_trust: Reading...
+module.db_use1.data.aws_iam_policy_document.pipeline_trust: Read complete after 0s [id=3383723699]
+module.db_euw1.data.aws_iam_policy_document.monitoring_trust: Reading...
+module.db_use1.data.aws_iam_policy_document.monitoring_trust: Read complete after 0s [id=76086537]
+module.db_euw1.data.aws_iam_policy_document.pipeline_trust: Reading...
+module.db_euw1.data.aws_iam_policy_document.pipeline_trust: Read complete after 0s [id=263595410]
+module.db_euw1.data.aws_iam_policy_document.monitoring_trust: Read complete after 0s [id=76086537]
 module.db_apse1.data.aws_iam_policy_document.monitoring_trust: Reading...
 module.db_apse1.data.aws_iam_policy_document.pipeline_trust: Reading...
-module.db_use1.data.aws_iam_policy_document.pipeline_trust: Reading...
-module.db_use1.data.aws_iam_policy_document.monitoring_trust: Reading...
-module.db_apse1.data.aws_iam_policy_document.pipeline_trust: Read complete after 0s [id=4018174632]
 module.db_apse1.data.aws_iam_policy_document.monitoring_trust: Read complete after 0s [id=76086537]
-module.db_use1.data.aws_iam_policy_document.monitoring_trust: Read complete after 0s [id=76086537]
-module.db_use1.data.aws_iam_policy_document.pipeline_trust: Read complete after 0s [id=3383723699]
-module.db_euw1.data.aws_iam_policy_document.pipeline_trust: Reading...
-module.db_euw1.data.aws_iam_policy_document.monitoring_trust: Reading...
-module.db_euw1.data.aws_iam_policy_document.monitoring_trust: Read complete after 0s [id=76086537]
-module.db_euw1.data.aws_iam_policy_document.pipeline_trust: Read complete after 0s [id=263595410]
+module.db_apse1.data.aws_iam_policy_document.pipeline_trust: Read complete after 0s [id=4018174632]
 
 Terraform used the selected providers to generate the following execution
 plan. Resource actions are indicated with the following symbols:
@@ -58,6 +58,17 @@ Terraform will perform the following actions:
               + (known after apply),
             ]
           + sid       = "ConnectAsMigratorOnly"
+        }
+      + statement {
+          + actions   = [
+              + "rds:CreateDBClusterSnapshot",
+              + "rds:DescribeDBClusterSnapshots",
+            ]
+          + resources = [
+              + "arn:aws:rds:ap-southeast-1:111111111111:cluster-snapshot:cloudnova-prod-apse1-pre-*",
+              + (known after apply),
+            ]
+          + sid       = "PreChangeClusterSnapshot"
         }
       + statement {
           + actions   = [
@@ -727,6 +738,17 @@ Terraform will perform the following actions:
         }
       + statement {
           + actions   = [
+              + "rds:CreateDBClusterSnapshot",
+              + "rds:DescribeDBClusterSnapshots",
+            ]
+          + resources = [
+              + "arn:aws:rds:eu-west-1:111111111111:cluster-snapshot:cloudnova-prod-euw1-pre-*",
+              + (known after apply),
+            ]
+          + sid       = "PreChangeClusterSnapshot"
+        }
+      + statement {
+          + actions   = [
               + "cloudwatch:DescribeAlarms",
             ]
           + resources = [
@@ -1390,6 +1412,17 @@ Terraform will perform the following actions:
               + (known after apply),
             ]
           + sid       = "ConnectAsMigratorOnly"
+        }
+      + statement {
+          + actions   = [
+              + "rds:CreateDBClusterSnapshot",
+              + "rds:DescribeDBClusterSnapshots",
+            ]
+          + resources = [
+              + "arn:aws:rds:us-east-1:111111111111:cluster-snapshot:cloudnova-prod-use1-pre-*",
+              + (known after apply),
+            ]
+          + sid       = "PreChangeClusterSnapshot"
         }
       + statement {
           + actions   = [

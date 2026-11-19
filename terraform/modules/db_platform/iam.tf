@@ -32,6 +32,14 @@ data "aws_iam_policy_document" "pipeline" {
     resources = ["arn:aws:rds-db:${var.region}:${var.account_id}:dbuser:${aws_rds_cluster.this.cluster_resource_id}/${var.pipeline_db_user}"]
   }
   statement {
+    sid       = "PreChangeClusterSnapshot"
+    actions   = ["rds:CreateDBClusterSnapshot", "rds:DescribeDBClusterSnapshots"]
+    resources = [
+      aws_rds_cluster.this.arn,
+      "arn:aws:rds:${var.region}:${var.account_id}:cluster-snapshot:${aws_rds_cluster.this.cluster_identifier}-pre-*"
+    ]
+  }
+  statement {
     sid       = "ReadAlarmsForBakeGate"
     actions   = ["cloudwatch:DescribeAlarms"] # does not support resource-level permissions
     resources = ["*"]
