@@ -1,0 +1,31 @@
+name: Terraform (offline plan)
+on:
+  pull_request: { paths: ["terraform/**", ".github/workflows/terraform.yml"] }
+permissions: { contents: read }
+jobs:
+  plan:
+    strategy: { fail-fast: false, matrix: { env: [global, staging, prod] } }
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: "terraform/envs/${{ matrix.env }}" } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.9.8 }
+      - name: "Format check (advisory: run terraform fmt -recursive terraform/ locally to fix)"
+        continue-on-error: true
+        run: terraform fmt -check -recursive -diff ../..
+      - name: Override S3 backend for offline CI plan
+        run: |
+          cat << 'EOF' > backend_override.tf
+          terraform {
+            backend "local" {}
+          }
+          EOF
+      - run: terraform init -reconfigure -input=false
+      - run: terraform validate
+      - name: Plan with no AWS account (provider skips credential validation; nothing is created)
+        run: set -o pipefail && terraform plan -input=false -lock=false -var offline=true -no-color | tee plan.txt
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with: { scan-type: config, scan-ref: terraform, exit-code: "1", severity: "HIGH,CRITICAL" }
+      - uses: actions/upload-artifact@v4
+        with: { name: "plan-${{ matrix.env }}", path: "terraform/envs/${{ matrix.env }}/plan.txt" }

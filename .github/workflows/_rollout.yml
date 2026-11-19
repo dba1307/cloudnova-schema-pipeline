@@ -1,0 +1,37 @@
+name: _rollout (reusable stage)
+on:
+  workflow_call:
+    inputs:
+      stage:              { type: string, required: true }
+      github_environment: { type: string, required: true }
+      bake_seconds:       { type: number, default: 20 }
+permissions: { contents: read, id-token: write }
+jobs:
+  rollout:
+    name: ${{ inputs.stage }}
+    runs-on: ${{ vars.TARGET_MODE == 'aws' && 'vpc-runners' || 'ubuntu-latest' }}
+    environment: ${{ inputs.github_environment }}
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: cloudnova }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: golden-schema, path: golden }
+      - name: Assume this environment's role (OIDC, no long-lived keys)
+        if: vars.TARGET_MODE == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with: { role-to-assume: "${{ vars.AWS_ROLE_ARN }}", aws-region: "${{ vars.AWS_REGION }}" }
+      - name: Roll out
+        env:
+          TARGET_MODE: ${{ vars.TARGET_MODE || 'demo' }}
+          DB_HOST: ${{ vars.DB_HOST }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          RDS_CA_BUNDLE: ${{ vars.RDS_CA_BUNDLE }}
+          ALARM_PREFIX: ${{ vars.ALARM_PREFIX }}
+          BAKE_SECONDS: ${{ inputs.bake_seconds }}
+        run: scripts/rollout_env.sh "${{ inputs.stage }}"

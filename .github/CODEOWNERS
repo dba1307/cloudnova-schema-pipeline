@@ -1,0 +1,7 @@
+# Backend teams own their migrations; the DBRE team owns the machinery that judges them.
+/tools/            @cloudnova/dbre
+/scripts/          @cloudnova/dbre
+/.github/          @cloudnova/dbre
+/terraform/        @cloudnova/dbre
+/db/bootstrap/     @cloudnova/dbre
+/queries/          @cloudnova/backend @cloudnova/dbre

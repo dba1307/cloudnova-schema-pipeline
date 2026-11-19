@@ -1,0 +1,7 @@
+# Local rehearsal: the same Postgres 16 the CI pipeline uses.   make demo
+services:
+  postgres:
+    image: postgres:16
+    environment: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: cloudnova }
+    ports: ["5432:5432"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 3s, retries: 20 }

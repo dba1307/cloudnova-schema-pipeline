@@ -1,0 +1,67 @@
+name: Deploy schema changes
+on:
+  push: { branches: [main], paths: ["migrations/**"] }
+  workflow_dispatch:
+permissions: { contents: read, id-token: write }
+# One rollout at a time across ALL regions. Never cancel a rollout midway.
+concurrency: { group: db-rollout, cancel-in-progress: false }
+
+jobs:
+  build-golden:
+    name: Build golden schema from migrations
+    runs-on: ubuntu-latest
+    outputs: { needs_approval: "${{ steps.lint.outputs.needs_approval }}" }
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: cloudnova }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env: { PGHOST: localhost, PGPORT: 5432, PGDATABASE: cloudnova, PGUSER: postgres, PGPASSWORD: postgres }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 2 }
+      - name: Re-lint (defence in depth; PR checks could have been bypassed) and detect NEW waivers only
+        id: lint
+        run: |
+          python3 tools/lint_migration.py migrations
+          CHANGED=$(git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" -- 'migrations/*.sql' 2>/dev/null || true)
+          if [ -n "$CHANGED" ]; then
+            python3 tools/lint_migration.py $CHANGED
+          else
+            echo "needs_approval=false" >> "$GITHUB_OUTPUT"
+          fi
+      - run: python3 tools/migrate.py up && mkdir -p golden && python3 tools/fingerprint.py dump > golden/golden.json
+      - uses: actions/upload-artifact@v4
+        with: { name: golden-schema, path: golden/golden.json }
+
+  # Runs only when a lint waiver exists (e.g. a destructive change): a DBRE must approve the 'dba-approval' environment.
+  dba-approval:
+    needs: build-golden
+    if: needs.build-golden.outputs.needs_approval == 'true'
+    runs-on: ubuntu-latest
+    environment: dba-approval
+    steps: [{ run: echo "approved by a DBRE" }]
+
+  staging:
+    needs: [build-golden, dba-approval]
+    if: always() && needs.build-golden.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.dba-approval.result)
+    uses: ./.github/workflows/_rollout.yml
+    with: { stage: staging, github_environment: staging, bake_seconds: 20 }
+
+  prod-canary:
+    name: prod canary (eu-west-1)
+    needs: staging
+    if: always() && needs.staging.result == 'success'
+    uses: ./.github/workflows/_rollout.yml
+    with: { stage: prod-canary, github_environment: production-canary, bake_seconds: 30 }
+
+  prod-rest:
+    name: prod ${{ matrix.region }}
+    needs: prod-canary
+    strategy:
+      max-parallel: 1        # one region at a time
+      fail-fast: true        # a failed region stops the remaining ones
+      matrix: { region: [us-east-1, ap-southeast-1] }
+    uses: ./.github/workflows/_rollout.yml
+    with: { stage: "prod-${{ matrix.region }}", github_environment: "production-${{ matrix.region }}", bake_seconds: 30 }

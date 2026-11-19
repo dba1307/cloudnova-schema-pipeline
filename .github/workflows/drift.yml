@@ -1,0 +1,56 @@
+name: Drift detection
+on:
+  schedule: [{ cron: "17 */6 * * *" }]
+  workflow_dispatch:
+    inputs:
+      simulate_drift: { description: "Demo: make an out-of-band change and expect detection", type: boolean, default: false }
+permissions: { contents: read, id-token: write, issues: write }
+jobs:
+  drift:
+    name: drift ${{ matrix.env }}
+    strategy: { fail-fast: false, matrix: { env: [staging, production-canary, production-us-east-1, production-ap-southeast-1] } }
+    runs-on: ${{ vars.TARGET_MODE == 'aws' && 'vpc-runners' || 'ubuntu-latest' }}
+    environment: ${{ matrix.env }}
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: cloudnova }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: vars.TARGET_MODE == 'aws'
+        with: { role-to-assume: "${{ vars.AWS_ROLE_ARN }}", aws-region: "${{ vars.AWS_REGION }}" }
+      - name: Golden schema = fresh DB migrated to the SAME version the target reports
+        env: { PGHOST: localhost, PGPORT: 5432, PGDATABASE: cloudnova, PGUSER: postgres, PGPASSWORD: postgres }
+        run: |
+          # In aws mode the target version is read from the live DB below; the demo target is migrated to head first.
+          if [ "${{ vars.TARGET_MODE || 'demo' }}" = "demo" ]; then
+            python3 tools/migrate.py up
+            if [ "${{ inputs.simulate_drift }}" = "true" ] && [ "${{ matrix.env }}" = "production-us-east-1" ]; then
+              psql -X -c "ALTER TABLE orders ADD COLUMN hotfix_flag int;" -c "CREATE INDEX hotfix_idx ON orders(status);"   # the 3am hand-fix
+            fi
+            python3 tools/fingerprint.py dump > live.json
+            # golden: same migrations on a clean schema (rebuild in a scratch schema-less DB)
+            psql -X -c "CREATE DATABASE golden"; PGDATABASE=golden python3 tools/migrate.py up; PGDATABASE=golden python3 tools/fingerprint.py dump > golden.json
+          else
+            echo "aws mode: see README "Drift" (connect with IAM token, dump live.json, build golden at live max(version))"; exit 1
+          fi
+      - name: Compare
+        id: cmp
+        run: |
+          if python3 tools/fingerprint.py compare golden.json live.json | tee drift.txt; then echo "drift=false" >> $GITHUB_OUTPUT; else echo "drift=true" >> $GITHUB_OUTPUT; fi
+          if [ "${{ inputs.simulate_drift }}" = "true" ] && [ "${{ matrix.env }}" = "production-us-east-1" ]; then
+            grep -q "DRIFT in" drift.txt && echo "simulated drift correctly DETECTED" || { echo "::error::drift NOT detected"; exit 1; }
+            echo "drift=false" >> $GITHUB_OUTPUT   # expected in simulation
+          fi
+      - name: Open an issue on real drift
+        if: steps.cmp.outputs.drift == 'true' && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --title "Schema drift in ${{ matrix.env }}" --label drift --body-file drift.txt
+      - name: Fail the run on real drift
+        if: steps.cmp.outputs.drift == 'true'
+        run: exit 1

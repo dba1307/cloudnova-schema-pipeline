@@ -1,0 +1,77 @@
+name: Migration PR checks
+on:
+  pull_request:
+permissions: { contents: read, pull-requests: write }
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  PGHOST: localhost
+  PGPORT: 5432
+  PGDATABASE: cloudnova
+
+jobs:
+  static:
+    name: 1 · Static checks (lint, immutability, gate self-test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Gate self-test (good migrations pass, every bad fixture is blocked)
+        run: python3 tests/test_lint.py
+      - name: Merged migrations are immutable
+        run: |
+          changed=$(git diff --name-status --diff-filter=MDR origin/${{ github.base_ref }}...HEAD -- migrations/ | tee /dev/stderr)
+          [ -z "$changed" ] || { echo "::error::Merged migrations must not be edited, renamed or deleted. Add a new migration."; exit 1; }
+      - name: Lint the migrations added in this PR
+        run: |
+          files=$(git diff --name-only --diff-filter=A origin/${{ github.base_ref }}...HEAD -- 'migrations/*.sql' | grep -v '\.down\.sql$' || true)
+          [ -z "$files" ] && { echo "no new migrations"; exit 0; }
+          python3 tools/lint_migration.py --github $files
+
+  dynamic:
+    name: 2 · Rehearsal on seeded Postgres (locks, rewrites, rollback, plans)
+    needs: static
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: cloudnova }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env: { PGUSER: postgres, PGPASSWORD: postgres }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Split base vs new migrations
+        run: |
+          mkdir -p base_migrations
+          git ls-tree -r --name-only origin/${{ github.base_ref }} -- migrations/ | while read f; do git show origin/${{ github.base_ref }}:"$f" > base_migrations/$(basename "$f"); done
+          git diff --name-only --diff-filter=A origin/${{ github.base_ref }}...HEAD -- 'migrations/*.sql' | grep -v '\.down\.sql$' > new_files.txt || true
+          echo "new migrations:"; cat new_files.txt
+      - name: Build 'production-like' state = base branch migrations + seed data
+        run: |
+          python3 tools/migrate.py up --dir base_migrations
+          psql -X -v ON_ERROR_STOP=1 -f db/seed_ci.sql
+      - name: Plan snapshot BEFORE
+        run: python3 tools/plan_check.py snapshot plans_before.json
+      - name: Dynamic check each new migration on a THROWAWAY clone (rewrite detection, lock hold time)
+        run: |
+          [ -s new_files.txt ] || { echo "nothing to check"; exit 0; }
+          psql -X -d postgres -c "CREATE DATABASE rehearsal TEMPLATE cloudnova"
+          PGDATABASE=rehearsal python3 tools/dynamic_check.py --apply $(cat new_files.txt)
+          psql -X -d postgres -c "DROP DATABASE rehearsal"
+      - name: Apply all migrations for real, then verify
+        run: python3 tools/migrate.py up && python3 tools/verify.py
+      - name: Plan snapshot AFTER, fail on regression
+        run: python3 tools/plan_check.py snapshot plans_after.json && python3 tools/plan_check.py compare plans_before.json plans_after.json
+      - name: Rollback rehearsal (down, then up again) - proves .down.sql files work
+        run: |
+          python3 tools/migrate.py down --steps 99
+          python3 tools/migrate.py up
+          python3 tools/migrate.py up   # idempotent: second run is a no-op
+      - name: Golden schema artifact
+        run: mkdir -p golden && python3 tools/fingerprint.py dump > golden/golden.json
+      - uses: actions/upload-artifact@v4
+        with: { name: golden-schema, path: golden/golden.json }
