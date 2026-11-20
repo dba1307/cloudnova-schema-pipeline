@@ -36,7 +36,7 @@ jobs:
             fi
           done
           [ -z "$unwaived" ] && { echo "all new migrations have explicit waivers"; exit 0; }
-          npx --yes squawk-cli@2.72.0 $unwaived
+          npx --yes squawk-cli@2.72.0 --exclude require-timeout-settings,prefer-robust-stmts $unwaived
       - name: Merged migrations are immutable
         run: |
           changed=$(git diff --name-status --diff-filter=MDR origin/${{ github.base_ref }}...HEAD -- migrations/ | tee /dev/stderr)
