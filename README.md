@@ -10,7 +10,7 @@ Takes a schema change from **pull request → staging → one canary region → 
 flowchart LR
   PR[Pull request<br/>migrations/NNN_x.sql + .down.sql] --> S
   subgraph CI[PR checks - Postgres 16 container]
-    S[1 Static lint<br/>R001-R018, immutability] --> D[2 Rehearsal on seeded DB<br/>rewrite + lock-hold detection<br/>plan snapshot before/after<br/>down→up rollback drill]
+    S[1 Static lint<br/>R001-R018 + Squawk,<br/>immutability] --> D[2 Rehearsal on seeded DB<br/>rewrite + lock-hold detection<br/>plan snapshot before/after<br/>down→up rollback drill]
   end
   D --> M[merge to main]
   M --> G[Build golden schema<br/>+ re-lint, detect waivers]
@@ -21,7 +21,7 @@ flowchart LR
   C --> R1[us-east-1] --> R2[ap-southeast-1]
   R2 --> OBS[(Always-on signals<br/>CloudWatch alarms · log_lock_waits<br/>auto_explain · pg_stat_statements)]
   DR[Drift workflow every 6h] -.-> OBS
-  C -. fail-fast: later regions never start .-> X[Stop + page]
+  C -. fail-fast: later regions never start .-> X[Stop + alert]
 ```
 
 | Layer | What | Where |
